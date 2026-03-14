@@ -1,0 +1,264 @@
+<!--  @author tbfirst  -->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-parent</artifactId>
+        <!--    升级 spring boot的版本使其支持 jdk21      -->
+        <version>3.5.7</version>
+        <relativePath/>
+        <!--  lookup parent from repository  -->
+    </parent>
+    <groupId>com.tbfirst</groupId>
+    <artifactId>agentbi</artifactId>
+    <version>0.0.1-SNAPSHOT</version>
+    <name>agentbi</name>
+    <properties>
+        <!--    使用 jdk21      -->
+        <java.version>21</java.version>
+        <!--    升级 mybatis-spring-boot-starter 到 3.0.3      -->
+        <mybatis.spring>3.0.3</mybatis.spring>
+        <!--    升级 mybatis-plus 到 3.5.5  -->
+        <mybatis.plus.spring>3.5.5</mybatis.plus.spring>
+        <!--  升级 lombok 到 1.18.30  -->
+        <lombok>1.18.30</lombok>
+        <!--  升级 mysql-connector-java 到 8.0.33  -->
+        <mysql.connector>8.0.33</mysql.connector>
+        <!--  升级 hutool 到 5.8.40  -->
+        <hutool>5.8.40</hutool>
+        <!--  升级 easyexcel 到 4.0.3  -->
+        <easyexcel>3.3.2</easyexcel>
+        <!--  显式声明 springdoc 版本  -->
+        <springdoc.version>2.8.13</springdoc.version>
+        <!--  显式声明 jakarta.jaxb.version 版本  -->
+        <jakarta.jaxb.version>4.0.1</jakarta.jaxb.version>
+        <cos.version>5.6.89</cos.version>
+        <opencsv.version>5.7.1</opencsv.version>
+        <commons.io.version>2.18.0</commons.io.version>
+        <dashscope.version>2.22.4</dashscope.version>
+        <langchain4j.version>1.0.0-beta3</langchain4j.version>
+        <langchain4j-redis.version>1.0.0-alpha1</langchain4j-redis.version>
+        <redisson.version>3.48.0</redisson.version>
+        <tika.version>3.2.3</tika.version>
+        <aliyun.oss.version>3.17.4</aliyun.oss.version>
+        <okhttp.version>4.12.0</okhttp.version>
+    </properties>
+    <dependencies>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-freemarker</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>${mybatis.spring}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.baomidou</groupId>
+            <artifactId>mybatis-plus-boot-starter</artifactId>
+            <version>${mybatis.plus.spring}</version>
+            <scope>compile</scope>
+        </dependency>
+        <!--  redis  -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
+        <!--  Elasticsearch - 移除版本号，使用 Spring Boot 管理  -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-elasticsearch</artifactId>
+        </dependency>
+        <!--  显式声明 SpringDoc 2.8.13 所有模块  -->
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>${springdoc.version}</version>
+        </dependency>
+        <!--  Tencent COS Utils（用于 IOUtils） -->
+        <dependency>
+            <groupId>com.qcloud</groupId>
+            <artifactId>cos_api</artifactId>
+            <version>${cos.version}</version>
+        </dependency>
+        <!--  https://mvnrepository.com/artifact/org.apache.commons/commons-lang3  -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+        <!--  easyexcel  -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>easyexcel</artifactId>
+            <version>${easyexcel}</version>
+            <scope>compile</scope>
+        </dependency>
+        <!--  Source: https://mvnrepository.com/artifact/cn.hutool/hutool-all  -->
+        <dependency>
+            <groupId>cn.hutool</groupId>
+            <artifactId>hutool-all</artifactId>
+            <version>${hutool}</version>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-devtools</artifactId>
+            <scope>runtime</scope>
+            <optional>true</optional>
+        </dependency>
+        <!--   mysql      -->
+        <dependency>
+            <groupId>mysql</groupId>
+            <artifactId>mysql-connector-java</artifactId>
+            <version>${mysql.connector}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.projectlombok</groupId>
+            <artifactId>lombok</artifactId>
+            <version>${lombok}</version>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--  Jakarta JAXB (替代javax)  -->
+        <dependency>
+            <groupId>jakarta.xml.bind</groupId>
+            <artifactId>jakarta.xml.bind-api</artifactId>
+            <version>${jakarta.jaxb.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains</groupId>
+            <artifactId>annotations</artifactId>
+            <version>24.0.1</version>
+            <!--  使用最新版本  -->
+            <scope>provided</scope>
+            <!--  通常只需编译时使用  -->
+        </dependency>
+        <!--  OpenCSV (CSV 生成)  -->
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>${opencsv.version}</version>
+        </dependency>
+        <!--  Apache Tika 依赖 commons-io 库  -->
+        <dependency>
+            <groupId>commons-io</groupId>
+            <artifactId>commons-io</artifactId>
+            <version>${commons.io.version}</version>
+            <!--  推荐最新稳定版  -->
+        </dependency>
+        <!--    引入阿里云百炼的 Java SDK      -->
+        <dependency>
+            <groupId>com.alibaba</groupId>
+            <artifactId>dashscope-sdk-java</artifactId>
+            <version>${dashscope.version}</version>
+        </dependency>
+        <!--    引入 langchain4j-open-ai-spring-boot-starter 依赖      -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai-spring-boot-starter</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!--    引入 langchain4j-spring-boot-starter 依赖      -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-spring-boot-starter</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!--  在引入spring-boot-starter-data-redis 后，再引入 langchain4j-redis 依赖  -->
+        <!--  redis 内部分量存储依赖  -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-redis</artifactId>
+            <version>${langchain4j-redis.version}</version>
+            <scope>compile</scope>
+        </dependency>
+        <!--  redisson 分布式锁依赖  -->
+        <!--  若使用的版本过高可能会导致与其他依赖冲突或无法识别，建议使用 3.48.0 版本  -->
+        <dependency>
+            <groupId>org.redisson</groupId>
+            <artifactId>redisson-spring-boot-starter</artifactId>
+            <version>${redisson.version}</version>
+        </dependency>
+        <!--  引入 Jackson 对 Java 8 日期时间 API 的支持  -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+        <!--  引入 rabbitmq 依赖  -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-amqp</artifactId>
+        </dependency>
+        <!-- 	添加消息转换器依赖		 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <!-- 	添加 Apache Tika 核心库	 -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-core</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <!--  Tika 的自动文件类型检测  -->
+        <dependency>
+            <groupId>org.apache.tika</groupId>
+            <artifactId>tika-parsers-standard-package</artifactId>
+            <version>${tika.version}</version>
+        </dependency>
+        <!--  配置好要使用阿里云 oss 存储服务所需要的 sdk 依赖  -->
+        <dependency>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>${aliyun.oss.version}</version>
+        </dependency>
+        <!--   导入 langchain4j-easy-rag 依赖       -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-easy-rag</artifactId>
+            <version>${langchain4j.version}</version>
+        </dependency>
+        <!--  OkHttp3（RAGFlow HTTP 调用）  -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp</artifactId>
+            <version>${okhttp.version}</version>
+        </dependency>
+    </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <!--  移除版本号，使用父级管理  -->
+            </plugin>
+        </plugins>
+    </build>
+</project>
