@@ -12,6 +12,7 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.util.StringUtils;
+
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -19,7 +20,6 @@ import java.util.stream.Collectors;
 
 
 /**
- * @author tbfirst
  * 基于 Redis 实现的会话记忆存储
  * 核心是重写 ChatMemoryStore 接口的方法，使用 Redis 存储会话信息
  */
@@ -44,14 +44,22 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
     @Override
     public List<ChatMessage> getMessages(Object memoryId) {
         try{
-            // 从 redis 中获取会话信息
-            String json = redisTemplate.opsForValue().get(memoryId.toString());
-            if (!StringUtils.hasText(json)) {
-                return new ArrayList<>();
+            List<ChatMessage> result = new ArrayList<>();
+
+            // 1. 读取 SystemMessage（长期）【原代码没有正确合并SystemMessage】
+            String systemJson = redisTemplate.opsForValue()
+                    .get(AiRedisEnum.SYSTEM_PROMPT.getValue() + "bi_template"); // 按用户隔离
+            if (StringUtils.hasText(systemJson)) {
+                result.addAll(ChatMessageDeserializer.messagesFromJson(systemJson));
             }
-            // 把 json 转为 List<ChatMessage>
-            List<ChatMessage> list = ChatMessageDeserializer.messagesFromJson(json);
-            return list;
+
+            // 2. 读取对话消息（短期）
+            String json = redisTemplate.opsForValue().get(memoryId.toString());
+            if (StringUtils.hasText(json)) {
+                result.addAll(ChatMessageDeserializer.messagesFromJson(json));
+            }
+
+            return result;
         } catch (RedisConnectionFailureException e) {
             log.error("Redis不可用，降级本地存储(即沿用langchain4j的实现而非自己的实现), memoryId={}", memoryId);
             return localFallback.getOrDefault(memoryId, new ArrayList<>());
@@ -214,44 +222,40 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
             return messages;
         }
 
-        // 策略：总是保留最新的对话轮次，同时确保消息成对出现（用户-AI）
-        List<ChatMessage> result = new ArrayList<>();
-        int messagesToKeep = MAX_MESSAGES;
+        List<ChatMessage> temp = new ArrayList<>(); // 逆序收集消息
+        int remaining = MAX_MESSAGES;
+        int i = messages.size() - 1;
 
-        // 从后向前遍历，确保保留完整的对话轮次
-        for (int i = messages.size() - 1; i >= 0 && result.size() < messagesToKeep; i--) {
-            ChatMessage currentMsg = messages.get(i);
+        while (i >= 0 && remaining > 0) {
+            ChatMessage current = messages.get(i);
 
-            // 如果是AI消息，同时检查前一条是否是用户消息（成对保留）
-            if (currentMsg instanceof AiMessage && i > 0) {
-                ChatMessage previousMsg = messages.get(i - 1);
-                if (previousMsg instanceof UserMessage) {
-                    // 成对添加用户-AI消息
-                    result.add(0, previousMsg);
-                    if (result.size() < messagesToKeep) {
-                        result.add(0, currentMsg);
-                    } else {
-                        // 如果空间不够，只添加AI消息
-                        result.add(0, currentMsg);
-                    }
-                    i--; // 跳过已处理的用户消息
+            // 检测是否为完整的用户-AI消息对（AI消息在前一条是用户消息的情况下）
+            if (current instanceof AiMessage && i > 0 && messages.get(i - 1) instanceof UserMessage) {
+                if (remaining >= 2) {
+                    // 保留完整的一对，注意添加顺序为逆序：先AI后用户，反转后即为正序（用户在前，AI在后）
+                    temp.add(current);               // AI
+                    temp.add(messages.get(i - 1));   // User
+                    remaining -= 2;
+                    i -= 2;
+                } else if (remaining == 1) {
+                    // 空间不足，只保留AI消息（放弃对应的用户消息）
+                    temp.add(current);
+                    remaining--;
+                    i--;
                 } else {
-                    result.add(0, currentMsg);
-                }
-            } else if (currentMsg instanceof UserMessage) {
-                // 检查下一条是否是AI消息（确保完整性）
-                if (i < messages.size() - 1 && messages.get(i + 1) instanceof AiMessage) {
-                    // 会在处理AI消息时一起添加，这里跳过
-                    continue;
-                } else {
-                    result.add(0, currentMsg);
+                    break; // remaining == 0，无需继续
                 }
             } else {
-                result.add(0, currentMsg);
+                // 单独的消息（用户消息、其他类型消息，或孤立的AI消息）
+                temp.add(current);
+                remaining--;
+                i--;
             }
         }
 
-        return result;
+        // 反转得到时间正序的列表
+        Collections.reverse(temp);
+        return temp;
     }
 
     @Override
