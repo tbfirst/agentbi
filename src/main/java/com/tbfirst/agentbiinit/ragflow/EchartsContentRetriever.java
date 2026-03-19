@@ -1,12 +1,14 @@
 package com.tbfirst.agentbiinit.ragflow;
 
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.rag.content.Content;
 import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.data.document.Metadata;      // 注意引入的是 TextSegment 中的 Metadata
 import dev.langchain4j.rag.query.Query;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -29,7 +31,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 【职责】：从 RAGFlow 知识库中检索相关内容（仅检索，不做增强）
  * 【对应 RAG 环节】：检索阶段（Retrieve）
  */
-//@Component
+@Component
 @Slf4j
 @RequiredArgsConstructor
 public class EchartsContentRetriever implements ContentRetriever {
@@ -42,11 +44,11 @@ public class EchartsContentRetriever implements ContentRetriever {
     @Value("${ragflow.api-key:}")
     private String apiKey;
 
-    @Value("${ragflow.echarts-kb-id:}")
-    private String echartsKbId;
+    @Value("${ragflow.echarts-name:}")
+    private String echartsName;
 
-    @Value("${ragflow.top-k:5}")
-    private int topK;
+    @Autowired
+    private ChatLanguageModel qwenPlusModel;
 
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -59,19 +61,20 @@ public class EchartsContentRetriever implements ContentRetriever {
 
         try {
             // 调用 RAGFlow 检索 API
+            // 构建请求body
+            // 其余参数如：avatar、description、permission等等若要配置请见ragflow 官方文档的 HTTP API页
             Map<String, Object> requestBody = Map.of(
-                    "kb_id", echartsKbId,
-                    "query", searchQuery,
-                    "top_k", topK
+                    "embedding_model", qwenPlusModel,
+                    "name", echartsName
             );
-
             String jsonBody = objectMapper.writeValueAsString(requestBody);
 
+            // 构建完整请求，详见 ragflow 官方文档
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(apiUrl + "/api/retrieval"))
+                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
+                    .uri(URI.create(apiUrl + "/api/v1/datasets"))
                     .header("Authorization", "Bearer " + apiKey)
                     .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(jsonBody))
                     .build();
 
             HttpResponse<String> response = httpClient.send(

@@ -84,6 +84,5 @@ langchain4j:
 ragflow:
   api-url: http://localhost:9380                    # RAGFlow API 基础 URL
   api-key: ${RAGFLOW_API_KEY}                       # RAGFlow API 密钥,从环境变量获取
-  echarts-kb-id: ${ECHARTS_KB_ID}                   # RAGFlow 知识库 ID,从环境变量获取
-  top-k: 5                                          # RAGFlow 检索 top-k 个文档,,默认值 5
+  echarts-name: ${ECHARTS_NAME}                     # RAGFlow 知识库创建的数据集的唯一名称,从环境变量获取
   similarity-threshold: 0.7                         # RAGFlow 文档相似度阈值,默认值 0.75，具体根据多次测试后确定
