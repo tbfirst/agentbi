@@ -16,6 +16,7 @@ import com.tbfirst.agentbiinit.utils.*;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.codec.binary.Hex;
+import org.redisson.api.RBloomFilter;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.amqp.core.MessageDeliveryMode;
@@ -67,6 +68,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
     @Autowired
     @Lazy
     private ChartServiceImpl self;
+    // Redis布隆过滤器（Redisson提供）
+    @Autowired
+    private RBloomFilter<String> bloomFilter;
 
     // 版本五：在四的基础上添加阿里云OSS存储（使用异步线程池处理文件解析）
     // 1、上传用户文件到阿里云 OSS  2、异步解析文件  3、返回文件 URL 去构建发送给 rabbitmq 的消息
@@ -218,124 +222,148 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         return csvUrl;
     }
 
-    // 版本七：在版本六的基础上，补充历史预热
+    // 版本八：在七的基础上，调换查缓存和文件检查、上传文件的流程顺序，同时添加布隆过滤器防止缓存穿透
     @Override
     public String genChartByAiMQApache2(MultipartFile multipartFile,
                                         GenerateChartByAiRequest generateChartByAiRequest,
                                         HttpServletRequest httpRequest) {
-        String mainThread = Thread.currentThread().getName();
         try {
-            // 0. Apache Tika 检查文件
-            try {
-                AiFileSecurityScanner.ScanResult scan = aiFileSecurityScanner.scan(multipartFile);
-                log.info("文件扫描通过: {}, 类型: {}, 预估行数: {}",
-                        multipartFile.getOriginalFilename(),
-                        scan.getMimeType(),
-                        scan.getRowCount());
-            } catch (AiFileSecurityScanner.SecurityScanException e) {
-                log.warn("文件扫描失败 [{}]: {}", e.getCode(), e.getMessage());
-                throw new BusinessException(ErrorCode.FILE_SCAN_ERROR, e.getMessage());
+            // 0. 生成指纹
+            String fingerprint = generateFingerprint(multipartFile, generateChartByAiRequest);
+            String userId = "testUser"; // 后续替换为真实用户
+            // 从 HttpServletRequest 获取 memoryId（如果没有则生成，保持和 MyRedisChatMemoryProvider 中的生成逻辑一致）
+            String memoryId = (String) httpRequest.getAttribute("memoryId");
+            if (memoryId == null) {
+                memoryId = userId + "-chat";
+                httpRequest.setAttribute("memoryId", memoryId);
             }
-            // 1. 上传用户文件到阿里云 OSS
-            String ossUrl = aliOssUtils.uploadFile(multipartFile.getBytes(), multipartFile.getOriginalFilename());
-            // 2. 生成指纹
-            try {
-                String fingerprint = generateFingerprint(multipartFile, generateChartByAiRequest);
-                String userId = "testUser"; // 后续替换为真实用户
-                // 从 HttpServletRequest 获取 memoryId（如果没有则生成，保持和 MyRedisChatMemoryProvider 中的生成逻辑一致）
-                String memoryId = (String) httpRequest.getAttribute("memoryId");
-                if (memoryId == null) {
-                    memoryId = userId + "-chat";
-                    httpRequest.setAttribute("memoryId", memoryId);
-                }
-
-                // 3.1 检查结果缓存
-                String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
-                String cacheValue = redisTemplate.opsForValue().get(cacheKey);
-                if (cacheValue != null) {
-                    log.info("命中结果缓存，直接返回");
-                    return "COMPLETED"; // 或用特殊标记表示已完成
-                }
-                // 3.2 【新增】检查历史缓存：用户历史缓存（7天TTL）→ 历史预热
-                String historyKey = AiRedisEnum.CHART_HISTORY.getValue() + memoryId + ":" + fingerprint;
-                String historyValue = redisTemplate.opsForValue().get(historyKey);
-                if (historyValue != null) {
-                    log.info("【L2命中】从历史恢复并预热L1, fingerprint={}", fingerprint);
-                    // 预热：复制到L1，重置1小时TTL
-                    redisTemplate.opsForValue().set(cacheKey, historyValue, 1, TimeUnit.HOURS);
-                    return "COMPLETED"; // 历史恢复，无需重新AI调用
-                }
-
-                // 4. 使用 Redisson分布式锁，防止并发重复调用
-                String lockKey = AiRedisEnum.CHART_LOCK.getValue() + fingerprint;
-                RLock lock = redissonClient.getLock(lockKey);
-                boolean locked = lock.tryLock(1, TimeUnit.SECONDS);
-                if (!locked) {
-                    // 未获取到锁，等待并重试（轮询缓存）
-                    for (int i = 0; i < 10; i++) {
-                        Thread.sleep(300);
-                        cacheValue = redisTemplate.opsForValue().get(cacheKey);
-                        if (cacheValue != null) {
-                            return "COMPLETED";
-                        }
-                    }
-                    throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统异常，请稍后重试");
-                }
-
-                try {
-                    // 5. 双重检查：可能在等待锁的过程中其他线程已写入缓存
-                    cacheValue = redisTemplate.opsForValue().get(cacheKey);
-                    if (cacheValue != null) {
-                        return "COMPLETED";
-                    }
-
-//                     6. 限流（在提交任务前执行，避免任务堆积）
-                    String limitKey = AiRedisEnum.CHART_LIMIT.getValue() + memoryId;
-                    int rate = 2; // 每秒生成2个令牌
-                    int bucketSize = 5; // 令牌桶容量为5
-                    redissonLimitManager.initRateLimiter(limitKey, rate, bucketSize);
-                    // 检查是否超过限流阈值
-                    if (redissonLimitManager.isOverLimit(limitKey)) {
-                        throw new BusinessException(ErrorCode.TOO_MANY_REQUESTS, "请求频率过快，请稍后重试");
-                    }
-
-                    // 7. 异步文件解析任务
-                    // 7.1 生成异步线程池处理文件解析任务的任务ID，确保唯一
-                    String fileTaskId = userId + "-file-" + UUID.randomUUID().toString();
-                    // 7.2 初始化异步线程池处理文件解析任务的任务
-                    log.info("初始化文件解析任务状态并存入 mysql，任务ID：{}", fileTaskId);
-                    // 构建实体对象，MyBatis-Plus 自动映射字段
-                    FileTaskInfo task = FileTaskInfo.builder()
-                            .fileTaskId(fileTaskId)
-                            .userId(userId)
-                            .fingerprint(fingerprint)
-                            .originalUrl(ossUrl)
-                            .status("PENDING")  // 初始化刚开始的文件任务解析状态为 PENDING
-                            .createdTime(LocalDateTime.now())
-                            .build();
-                    fileTaskMapper.insert(task);  // 插入实体
-                    // 7.3 【关键】直接提交异步处理文件解析任务
-                    log.info("【主线程 {}】提交异步文件解析任务给异步线程池，fileTaskId={}", mainThread, fileTaskId);
-                    // 【关键】通过注入自身代理调用异步方法，确保在当前类中执行
-                    // Spring 代理机制：@Async 通过 AOP 代理实现，只有外部调用才会触发代理，同类自调用会绕过代理
-                    // 【关键】该文件解析内部会执行 rabbitmq 的异步调用 ai 服务
-                    self.submitFileTaskAsync(fileTaskId, ossUrl, task, userId, fingerprint, generateChartByAiRequest, memoryId);
-
-                    // 8. 异步文件解析后调用 ai 服务
-                    // 告诉用户"文件正在解析，AI 任务将在解析完成后自动触发"
-                    return "FILE_PARSE_INITIATED:" + fileTaskId;
-                } finally {
-                    lock.unlock();
-                }
+            // 1.1 检查结果缓存
+            String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
+            String cacheValue = redisTemplate.opsForValue().get(cacheKey);
+            if (cacheValue != null) {
+                log.info("命中结果缓存，直接返回");
+                return "COMPLETED"; // 或用特殊标记表示已完成
             }
-            catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new BusinessException(ErrorCode.SYSTEM_ERROR, "请求超时");
+            // 1.2 【布隆过滤器】快速判断是否可能存在
+            // false = 肯定不存在，避免查数据库，直接去检查文件，上传文件以及之后的流程
+            if (!bloomFilter.contains(fingerprint)) {
+                log.info("布隆过滤器判定不存在，跳过二级缓存查询");
+                return processNewFile(multipartFile, fingerprint, cacheKey, cacheValue, memoryId, userId, generateChartByAiRequest);
             }
+            // 1.3 检查历史缓存：用户历史缓存（7天TTL）→ 历史预热
+            String historyKey = AiRedisEnum.CHART_HISTORY.getValue() + memoryId + ":" + fingerprint;
+            String historyValue = redisTemplate.opsForValue().get(historyKey);
+            if (historyValue != null) {
+                log.info("【L2命中】从历史恢复并预热L1, fingerprint={}", fingerprint);
+                // 预热：复制到L1，重置1小时TTL
+                redisTemplate.opsForValue().set(cacheKey, historyValue, 1, TimeUnit.HOURS);
+                return "COMPLETED"; // 历史恢复，无需重新AI调用
+            }
+            // 1.4 布隆误判了（假阳性），实际不存在
+            log.warn("布隆过滤器误判: {}", fingerprint);
+            return processNewFile(multipartFile, fingerprint, cacheKey, cacheValue, memoryId, userId, generateChartByAiRequest);
+        }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "请求超时");
+        }
+    }
+    private String processNewFile(MultipartFile multipartFile,
+                                  String fingerprint,
+                                  String cacheKey,
+                                  String cacheValue,
+                                  String memoryId,
+                                  String userId,
+                                  GenerateChartByAiRequest generateChartByAiRequest) throws InterruptedException {
+        String mainThread = Thread.currentThread().getName();
+        // 2. Apache Tika 检查文件
+        try {
+            AiFileSecurityScanner.ScanResult scan = aiFileSecurityScanner.scan(multipartFile);
+            log.info("文件扫描通过: {}, 类型: {}, 预估行数: {}",
+                    multipartFile.getOriginalFilename(),
+                    scan.getMimeType(),
+                    scan.getRowCount());
+        } catch (AiFileSecurityScanner.SecurityScanException e) {
+            log.warn("文件扫描失败 [{}]: {}", e.getCode(), e.getMessage());
+            throw new BusinessException(ErrorCode.FILE_SCAN_ERROR, e.getMessage());
+        }
+
+        // 3 上传用户文件到阿里云 OSS
+        String ossUrl = null;
+        try {
+            ossUrl = aliOssUtils.uploadFile(multipartFile.getBytes(), multipartFile.getOriginalFilename());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
+        // 4. 使用 Redisson分布式锁，防止并发重复调用
+        String lockKey = AiRedisEnum.CHART_LOCK.getValue() + fingerprint;
+        RLock lock = redissonClient.getLock(lockKey);
+        boolean locked = false;
+        try {
+            locked = lock.tryLock(1, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        if (!locked) {
+            // 未获取到锁，等待并重试（轮询缓存）
+            for (int i = 0; i < 10; i++) {
+                Thread.sleep(300);
+                cacheValue = redisTemplate.opsForValue().get(cacheKey);
+                if (cacheValue != null) {
+                    return "COMPLETED";
+                }
+            }
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统异常，请稍后重试");
+        }
+
+        try {
+            // 5. 双重检查：可能在等待锁的过程中其他线程已写入缓存
+            cacheValue = redisTemplate.opsForValue().get(cacheKey);
+            if (cacheValue != null) {
+                return "COMPLETED";
+            }
+
+            // 6. 限流（在提交任务前执行，避免任务堆积）
+            String limitKey = AiRedisEnum.CHART_LIMIT.getValue() + memoryId;
+            int rate = 2; // 每秒生成2个令牌
+            int bucketSize = 5; // 令牌桶容量为5
+            redissonLimitManager.initRateLimiter(limitKey, rate, bucketSize);
+            // 检查是否超过限流阈值
+            if (redissonLimitManager.isOverLimit(limitKey)) {
+                throw new BusinessException(ErrorCode.TOO_MANY_REQUESTS, "请求频率过快，请稍后重试");
+            }
+
+            // 7. 异步文件解析任务
+            // 7.1 生成异步线程池处理文件解析任务的任务ID，确保唯一
+            String fileTaskId = userId + "-file-" + UUID.randomUUID().toString();
+            // 7.2 初始化异步线程池处理文件解析任务的任务
+            log.info("初始化文件解析任务状态并存入 mysql，任务ID：{}", fileTaskId);
+            // 构建实体对象，MyBatis-Plus 自动映射字段
+            FileTaskInfo task = FileTaskInfo.builder()
+                    .fileTaskId(fileTaskId)
+                    .userId(userId)
+                    .fingerprint(fingerprint)
+                    .originalUrl(ossUrl)
+                    .status("PENDING")  // 初始化刚开始的文件任务解析状态为 PENDING
+                    .createdTime(LocalDateTime.now())
+                    .build();
+            fileTaskMapper.insert(task);  // 插入实体
+            // 7.3 【关键】直接提交异步处理文件解析任务
+            log.info("【主线程 {}】提交异步文件解析任务给异步线程池，fileTaskId={}", mainThread, fileTaskId);
+            // 【关键】通过注入自身代理调用异步方法，确保在当前类中执行
+            // Spring 代理机制：@Async 通过 AOP 代理实现，只有外部调用才会触发代理，同类自调用会绕过代理
+            // 【关键】该文件解析内部会执行 rabbitmq 的异步调用 ai 服务
+            self.submitFileTaskAsync(fileTaskId, ossUrl, task, userId, fingerprint, generateChartByAiRequest, memoryId);
+
+            // 8. 异步文件解析后调用 ai 服务
+            // 告诉用户"文件正在解析，AI 任务将在解析完成后自动触发"
+            return "FILE_PARSE_INITIATED:" + fileTaskId;
+        } finally {
+            lock.unlock();
+        }
     }
+
 
     // 指纹版本三：进行空值处理以及改用 Java 标准库 SHA-256替代 md5
     private String generateFingerprint(MultipartFile file,
@@ -346,7 +374,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             // 1. 文件内容哈希
             String fileFirst256Hex = sha256Hex(fileBytes);
 
-            // 2. 构建有序参数Map
+            // 2. 构建有序参数Map，确保参数顺序不影响指纹结果
             Map<String, String> params = new TreeMap<>();
             params.put("fileMd5", fileFirst256Hex);
             params.put("goal", nullToEmpty(request.getGoal()));
