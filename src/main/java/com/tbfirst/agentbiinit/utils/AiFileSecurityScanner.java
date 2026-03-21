@@ -261,17 +261,29 @@ public class AiFileSecurityScanner {
     @Data
     @AllArgsConstructor
     public static class ScanResult {
+        // 扫描结果是否通过
         private boolean passed;
+
+        // 文件的MIME类型
         private String mimeType;
+
+        // 估算的行数
         private int rowCount;
+        // 估算的单元格数
         private long cellCount;
     }
 
     @Data
     private static class ContentAnalysis {
+        // 是否包含Prompt Injection消息
         boolean containsPromptInjection;
+
+        // 是否包含可执行代码
         boolean containsCode;
+
+        // 估算的行数
         int rowCount;
+        // 估算的单元格数
         long cellCount;
     }
 

@@ -72,11 +72,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
     @Autowired
     private RBloomFilter<String> bloomFilter;
 
-    // 版本五：在四的基础上添加阿里云OSS存储（使用异步线程池处理文件解析）
-    // 1、上传用户文件到阿里云 OSS  2、异步解析文件  3、返回文件 URL 去构建发送给 rabbitmq 的消息
-    // 两套异步机制：异步 rabbitmq 处理 ai 调用，异步线程池处理文件解析
-    // 两个任务：rabbitmq 处理 ai 调用任务（taskId），异步线程池处理文件解析任务（fileTaskId）
-    // 两种存储机制：1、redis 存储 ai 调用任务相关 + 短期的文件存储状态 2、mysql 存储 oss 存储文件相关
+    // 使用异步线程池处理文件解析
     @Async("fileParserExecutor")        // ← 关键注解，丢给对应线程池执行
     public CompletableFuture<String> submitFileTaskAsync(String fileTaskId,
                                                          String ossUrl,
@@ -91,7 +87,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
 
         long startTime = System.currentTimeMillis();
 
-        // 1. 可选：Redis 缓存短期状态（加速查询，TTL 5分钟）
+        // 1. 可选：Redis 缓存短期文件解析任务状态（加速查询，TTL 5分钟）
         String redisKey = AiRedisEnum.FILE_TASK.getValue() + fileTaskId;
         redisTemplate.opsForValue().set(redisKey, "INIT", 5, TimeUnit.MINUTES);
 
@@ -222,7 +218,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         return csvUrl;
     }
 
-    // 版本八：在七的基础上，调换查缓存和文件检查、上传文件的流程顺序，同时添加布隆过滤器防止缓存穿透
+    // 版本九：在八的基础上，修改多级缓存配置
     @Override
     public String genChartByAiMQApache2(MultipartFile multipartFile,
                                         GenerateChartByAiRequest generateChartByAiRequest,
@@ -237,31 +233,38 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 memoryId = userId + "-chat";
                 httpRequest.setAttribute("memoryId", memoryId);
             }
-            // 1.1 检查结果缓存
+            // 1.1 检查一级缓存：只存指针和时间戳
             String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
-            String cacheValue = redisTemplate.opsForValue().get(cacheKey);
-            if (cacheValue != null) {
+            String pointer = redisTemplate.opsForValue().get(cacheKey);
+            if (pointer != null) {
                 log.info("命中结果缓存，直接返回");
-                return "COMPLETED"; // 或用特殊标记表示已完成
+                String historyKey = pointer.split("\\|")[0];
+                String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");  // 取真实数据
+                return resultJson;
             }
             // 1.2 【布隆过滤器】快速判断是否可能存在
             // false = 肯定不存在，避免查数据库，直接去检查文件，上传文件以及之后的流程
             if (!bloomFilter.contains(fingerprint)) {
                 log.info("布隆过滤器判定不存在，跳过二级缓存查询");
-                return processNewFile(multipartFile, fingerprint, cacheKey, cacheValue, memoryId, userId, generateChartByAiRequest);
+                return processNewFile(multipartFile, fingerprint, cacheKey, pointer, memoryId, userId, generateChartByAiRequest);
             }
-            // 1.3 检查历史缓存：用户历史缓存（7天TTL）→ 历史预热
+            // 1.3 检查二级缓存：存用户历史缓存（7天TTL）
             String historyKey = AiRedisEnum.CHART_HISTORY.getValue() + memoryId + ":" + fingerprint;
-            String historyValue = redisTemplate.opsForValue().get(historyKey);
-            if (historyValue != null) {
+            Map<Object, Object> historyMap = redisTemplate.opsForHash().entries(historyKey);
+            boolean historyMapKey = historyMap.containsKey("1");
+            // 如果二级缓存中存在历史数据（通过hashkey是否为1判断），预热后直接返回历史数据（无需重新AI调用）
+            if (historyMapKey) {
                 log.info("【L2命中】从历史恢复并预热L1, fingerprint={}", fingerprint);
-                // 预热：复制到L1，重置1小时TTL
-                redisTemplate.opsForValue().set(cacheKey, historyValue, 1, TimeUnit.HOURS);
-                return "COMPLETED"; // 历史恢复，无需重新AI调用
+                // 预热：复制到L1，重置1小时TTL（重建L1指针）
+                // L1：存指针+时间戳（约100字节，1小时）
+                String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
+                pointer = historyKey + "|" + System.currentTimeMillis();
+                redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
+                return resultJson;
             }
             // 1.4 布隆误判了（假阳性），实际不存在
             log.warn("布隆过滤器误判: {}", fingerprint);
-            return processNewFile(multipartFile, fingerprint, cacheKey, cacheValue, memoryId, userId, generateChartByAiRequest);
+            return processNewFile(multipartFile, fingerprint, cacheKey, pointer, memoryId, userId, generateChartByAiRequest);
         }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -271,7 +274,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
     private String processNewFile(MultipartFile multipartFile,
                                   String fingerprint,
                                   String cacheKey,
-                                  String cacheValue,
+                                  String pointer,
                                   String memoryId,
                                   String userId,
                                   GenerateChartByAiRequest generateChartByAiRequest) throws InterruptedException {
@@ -309,9 +312,11 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             // 未获取到锁，等待并重试（轮询缓存）
             for (int i = 0; i < 10; i++) {
                 Thread.sleep(300);
-                cacheValue = redisTemplate.opsForValue().get(cacheKey);
-                if (cacheValue != null) {
-                    return "COMPLETED";
+                pointer = redisTemplate.opsForValue().get(cacheKey);
+                if (pointer != null) {
+                    String historyKey = pointer.split("\\|")[0];
+                    String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
+                    return resultJson != null ? resultJson : "COMPLETED";
                 }
             }
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统异常，请稍后重试");
@@ -319,9 +324,11 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
 
         try {
             // 5. 双重检查：可能在等待锁的过程中其他线程已写入缓存
-            cacheValue = redisTemplate.opsForValue().get(cacheKey);
-            if (cacheValue != null) {
-                return "COMPLETED";
+            pointer = redisTemplate.opsForValue().get(cacheKey);
+            if (pointer != null) {
+                String historyKey = pointer.split("\\|")[0];
+                String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
+                return resultJson != null ? resultJson : "COMPLETED";
             }
 
             // 6. 限流（在提交任务前执行，避免任务堆积）
@@ -376,7 +383,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
 
             // 2. 构建有序参数Map，确保参数顺序不影响指纹结果
             Map<String, String> params = new TreeMap<>();
-            params.put("fileMd5", fileFirst256Hex);
+            params.put("fileHash", fileFirst256Hex);
             params.put("goal", nullToEmpty(request.getGoal()));
             params.put("chartType", nullToEmpty(request.getChartType()));
             params.put("name", nullToEmpty(request.getName()));

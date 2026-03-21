@@ -44,7 +44,7 @@ public class ChartTaskConsumer {
      * @param tag
      */
 
-    // 版本五：传入的参数是 ChartTaskMessage2，基于 csvUrl 构建用户提示词
+    // 版本六：修改多级缓存配置
     @RabbitListener(queues = RabbitConfig.CHART_QUEUE,
             containerFactory = "chartListenerContainerFactory")
     public void handleChartTask(ChartTaskMessage2 message, Channel channel,
@@ -89,11 +89,17 @@ public class ChartTaskConsumer {
             // 4. 调用阿里云百炼大模型
             AiAnalysisVO result = aiChartService.analyzeAndGenerateChart(systemPrompt, userPrompt, memoryId);
 
-            // 3. 存储结果和历史到缓存
+            // 3. 存储结果和历史到缓存，优化后（L1存指针，L2存数据）：
             String resultJson = objectMapper.writeValueAsString(result);
-            redisTemplate.opsForValue().set(cacheKey, resultJson, 1, TimeUnit.HOURS);
             String historyKey = AiRedisEnum.CHART_HISTORY.getValue() + memoryId + ":" + fingerprint;
-            redisTemplate.opsForValue().set(historyKey, resultJson, 7, TimeUnit.DAYS);
+            // L2：只存1份完整数据（7天）
+            // 先存储数据到 Hash，标记"1"，表示数据存在
+            redisTemplate.opsForHash().put(historyKey, "1", resultJson);
+            // 然后对整个 Hash 设置过期时间
+            redisTemplate.expire(historyKey, 7, TimeUnit.DAYS);
+            // L1：存指针+时间戳（约100字节，1小时）
+            String pointer = historyKey + "|" + System.currentTimeMillis();
+            redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
 
             // 4. 去缓存中根据任务 id 更新状态为成功
             updateTaskStatus(taskKey, TaskStatus.SUCCEEDED, resultJson);
