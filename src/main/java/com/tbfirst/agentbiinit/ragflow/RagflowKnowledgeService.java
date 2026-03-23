@@ -45,9 +45,8 @@ public class RagflowKnowledgeService {
 
         try {
             RetrievalRequest request = RetrievalRequest.builder()
-                    .kbId(properties.getEchartsKbId())
+                    .kbId(properties.getEchartsName())
                     .query(query)
-                    .topK(properties.getTopK())
                     .similarityThreshold(properties.getSimilarityThreshold())
                     .build();
 

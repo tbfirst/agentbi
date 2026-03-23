@@ -31,7 +31,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * 【职责】：从 RAGFlow 知识库中检索相关内容（仅检索，不做增强）
  * 【对应 RAG 环节】：检索阶段（Retrieve）
  */
-@Component
+//@Component
 @Slf4j
 @RequiredArgsConstructor
 public class EchartsContentRetriever implements ContentRetriever {
@@ -47,7 +47,7 @@ public class EchartsContentRetriever implements ContentRetriever {
     @Value("${ragflow.echarts-name:}")
     private String echartsName;
 
-    @Autowired
+//    @Autowired
     private ChatLanguageModel qwenPlusModel;
 
     private final HttpClient httpClient = HttpClient.newBuilder()

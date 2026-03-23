@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
@@ -72,10 +73,10 @@ public class ChartTaskConsumer {
 
             // 【关键】消费者在调用 AI 前，先检查缓存是否有结果
             String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
-            String cacheValue = redisTemplate.opsForValue().get(cacheKey);
-            if (cacheValue != null) {
+            String pointer = redisTemplate.opsForValue().get(cacheKey);
+            if (pointer != null) {
                 log.info("【消费者缓存命中】taskId={}, 跳过AI", message.getTaskId());
-                updateTaskStatus(taskKey, TaskStatus.SUCCEEDED, cacheValue);
+                updateTaskStatus(taskKey, TaskStatus.SUCCEEDED, pointer);
                 channel.basicAck(tag, false);
                 return;
             }
@@ -98,7 +99,7 @@ public class ChartTaskConsumer {
             // 然后对整个 Hash 设置过期时间
             redisTemplate.expire(historyKey, 7, TimeUnit.DAYS);
             // L1：存指针+时间戳（约100字节，1小时）
-            String pointer = historyKey + "|" + System.currentTimeMillis();
+            pointer = cacheKey + "|" + System.currentTimeMillis();
             redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
 
             // 4. 去缓存中根据任务 id 更新状态为成功

@@ -27,7 +27,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-
+import com.tbfirst.agentbiinit.service.UserService;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -71,6 +71,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
     // Redis布隆过滤器（Redisson提供）
     @Autowired
     private RBloomFilter<String> bloomFilter;
+
+    @Autowired
+    private UserService userService;
 
     // 使用异步线程池处理文件解析
     @Async("fileParserExecutor")        // ← 关键注解，丢给对应线程池执行
@@ -226,7 +229,8 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         try {
             // 0. 生成指纹
             String fingerprint = generateFingerprint(multipartFile, generateChartByAiRequest);
-            String userId = "testUser"; // 后续替换为真实用户
+            UserEntity loginUser = userService.getLoginUser();
+            String userId = String.valueOf(loginUser.getId());
             // 从 HttpServletRequest 获取 memoryId（如果没有则生成，保持和 MyRedisChatMemoryProvider 中的生成逻辑一致）
             String memoryId = (String) httpRequest.getAttribute("memoryId");
             if (memoryId == null) {
@@ -258,7 +262,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 // 预热：复制到L1，重置1小时TTL（重建L1指针）
                 // L1：存指针+时间戳（约100字节，1小时）
                 String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
-                pointer = historyKey + "|" + System.currentTimeMillis();
+                pointer = cacheKey + "|" + System.currentTimeMillis();
                 redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
                 return resultJson;
             }

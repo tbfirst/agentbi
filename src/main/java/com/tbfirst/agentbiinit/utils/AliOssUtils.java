@@ -41,6 +41,9 @@ public class AliOssUtils {
     public String uploadFile(byte[] bytes, String objectName) {
         // 1、创建 OSS 客户端
         OSS ossClient = new OSSClientBuilder().build(endpoint, accessKeyId, accessKeySecret);
+        if(ossClient == null) {
+            throw new RuntimeException("将application.yml中的aliyun.oss配置替换为自己的配置，包括endpoint、access-key-id、access-key-secret、bucket-name");
+        }
 
         try {
             // 2、创建 PutObject请求

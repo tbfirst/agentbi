@@ -8,6 +8,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.io.Serializable;
 import java.time.LocalDateTime;
 
 /**
@@ -18,8 +19,9 @@ import java.time.LocalDateTime;
 @NoArgsConstructor   // ← Jackson 需要这个无参构造
 @AllArgsConstructor  // ← @Builder 需要这个配合全参构造
 @TableName("file_task_info")  // ← 指定表名
-public class FileTaskInfo {
+public class FileTaskInfo implements Serializable {
 
+    private static final long serialVersionUID = 1L;
     /**
      * id
      */

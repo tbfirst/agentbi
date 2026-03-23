@@ -1,7 +1,6 @@
 package com.tbfirst.agentbiinit.model.entity;
 
 import lombok.Data;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -21,10 +20,7 @@ public class RagflowProperties {
     private String apiKey;              // 从 application.yml 中读取 ragflow.apiKey 配置
 
     /** ECharts 知识库 ID */
-    private String echartsKbId;         // 从 application.yml 中读取 ragflow.echartsKbId 配置
-
-    /** 检索返回 topK 数量 */
-    private int topK = 5;
+    private String echartsName;         // 从 application.yml 中读取 ragflow.echartsName 配置
 
     /** 相似度阈值 */
     private double similarityThreshold = 0.7;
