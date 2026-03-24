@@ -128,44 +128,6 @@ public class FileParseUtils {
     }
 
     /**
-     * 获取单元格的值（支持多种格式）
-     */
-    private static String getCellValue(Cell cell) {
-        if (cell == null) {
-            return "";
-        }
-
-        switch (cell.getCellType()) {
-            case STRING:
-                return cell.getStringCellValue();
-            case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell)) {
-                    return cell.getLocalDateTimeCellValue().toString();
-                } else {
-                    // 处理科学计数法，保留原始精度
-                    double num = cell.getNumericCellValue();
-                    if (num == (long) num) {
-                        return String.valueOf((long) num);
-                    }
-                    return String.valueOf(num);
-                }
-            case BOOLEAN:
-                return String.valueOf(cell.getBooleanCellValue());
-            case FORMULA:
-                // 计算公式结果
-                try {
-                    return String.valueOf(cell.getNumericCellValue());
-                } catch (Exception e) {
-                    return cell.getStringCellValue();
-                }
-            case BLANK:
-                return "";
-            default:
-                return "";
-        }
-    }
-
-    /**
      * 从文件名提取扩展名
      */
     public static String getFileExtension(String filename) {

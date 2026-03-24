@@ -2,6 +2,8 @@ package com.tbfirst.agentbiinit.service;
 
 
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.tbfirst.agentbiinit.model.dto.chart.ChartResultResponse;
+import com.tbfirst.agentbiinit.model.dto.chart.FileTaskStatusResponse;
 import com.tbfirst.agentbiinit.model.dto.chart.GenerateChartByAiRequest;
 import com.tbfirst.agentbiinit.model.entity.ChartEntity;
 import jakarta.servlet.http.HttpServletRequest;
@@ -18,4 +20,14 @@ public interface ChartService extends IService<ChartEntity> {
      * 【rabbitmq 异步调用 ai，异步线程池处理文件解析】
      */
     String genChartByAiMQApache2(MultipartFile multipartFile, GenerateChartByAiRequest generateChartByAiRequest, HttpServletRequest request);
+
+    /**
+     * 查询文件解析任务状态
+     */
+    FileTaskStatusResponse getFileTaskStatus(String fileTaskId);
+
+    /**
+     * 根据指纹获取图表结果
+     */
+    ChartResultResponse getChartResultByFingerprint(String fingerprint);
 }

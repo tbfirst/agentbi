@@ -1,0 +1,88 @@
+spring:
+  application:
+    name: agentbi
+  profiles:
+    active: dev
+  # 支持 swagger3
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+  # 数据库配置
+  # todo 需替换配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://localhost:3306/my_db
+    username: root
+    password: 123456
+  # Redis 配置
+  # todo 需替换配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 2
+      password: "123456"
+  # RabbitMQ 配置
+  # todo 需替换配置，修改为自己的用户名密码虚拟主机等
+  rabbitmq:
+    host: localhost
+    port: 5672          # 发送信息的端口
+    username: bitestuser     # 用户名
+    password: 123456    # 密码
+    virtual-host: bitest # 虚拟主机
+  # 阿里云 OSS 存储
+  # todo 需替换配置，修改为自己的 accessKey、secretKey、region、bucket-name
+aliyun:
+  oss:
+    # 由于我已经在系统环境中配置了 access-key-id 和 access-key-secret，故这里不需要明文配置，而是直接从环境变量中获取
+    access-key-id: ${OSS_ACCESS_KEY_ID}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET}
+    # 注意要和自己的阿里云 oss 的 bucket-name以及创建时设置的地域endpoint相同
+    # todo 需替换配置
+    endpoint:
+    bucket-name:
+
+server:
+  address: 0.0.0.0
+  port: 8101
+  servlet:
+    context-path: /api
+    session:
+      cookie:
+        max-age: 2592000
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true    # 开启下划线转驼峰命名
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+  global-config:
+    db-config:
+      logic-delete-field: isDelete # 全局逻辑删除的实体字段名
+      logic-delete-value: 1 # 逻辑已删除值（默认为 1）
+      logic-not-delete-value: 0 # 逻辑未删除值（默认为 0）
+
+springdoc:
+  api-docs:
+    enabled: true
+    path: /v3/api-docs
+  swagger-ui:
+    enabled: true
+    path: /swagger-ui.html
+  packages-to-scan:
+    - com.tbfirst.agentbiinit.controller  # 此处填写你的 Controller 包路径
+
+# 配置 langchain4j 与阿里云百炼的 Java SDK 集成
+langchain4j:
+  open-ai:
+    chat-model:
+      api-key: ${DASHSCOPE_API_KEY}   # 从环境变量中获取 API 密钥
+      model-name: qwen-plus           # 模型名称，即模型 Code
+      base-url: https://dashscope.aliyuncs.com/compatible-mode/v1    # 模型 API 基础 URL
+      log-responses: true              # 是否记录响应日志
+      log-requests: true               # 是否记录请求日志
+
+# RAGFlow 配置
+ragflow:
+  api-url: http://localhost:9380                    # RAGFlow API 基础 URL
+  api-key: ${RAGFLOW_API_KEY}                       # RAGFlow API 密钥,从环境变量获取
+  echarts-name: ${ECHARTS_NAME}                     # RAGFlow 知识库创建的数据集的唯一名称,从环境变量获取
+  similarity-threshold: 0.7                         # RAGFlow 文档相似度阈值,默认值 0.75，具体根据多次测试后确定

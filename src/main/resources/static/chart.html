@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智能图表生成 - 智能BI系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 800px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .file-upload {
+            border: 2px dashed #ddd;
+            border-radius: 5px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: border-color 0.3s, background-color 0.3s;
+        }
+
+        .file-upload:hover {
+            border-color: #667eea;
+            background-color: #f8f9ff;
+        }
+
+        .file-upload input[type="file"] {
+            display: none;
+        }
+
+        .file-upload-icon {
+            font-size: 48px;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .file-upload-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .file-name {
+            margin-top: 10px;
+            color: #667eea;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .links {
+            text-align: center;
+            margin-top: 20px;
+        }
+
+        .links a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 14px;
+            margin: 0 10px;
+        }
+
+        .links a:hover {
+            text-decoration: underline;
+        }
+
+        .message {
+            padding: 10px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .message.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .message.info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9ff;
+            border-radius: 5px;
+        }
+
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .loading-status {
+            margin-top: 10px;
+            color: #667eea;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .chart-container {
+            display: none;
+            margin-top: 30px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+        }
+
+        .chart-container h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+
+        #chart {
+            width: 100%;
+            height: 400px;
+        }
+
+        .analysis-result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f8f9ff;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+        }
+
+        .analysis-result h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 16px;
+        }
+
+        .analysis-result p {
+            color: #666;
+            line-height: 1.6;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>智能图表生成</h1>
+            <p>上传数据文件，AI自动生成专业图表</p>
+        </div>
+
+        <div id="message" class="message"></div>
+
+        <form id="chartForm">
+            <div class="form-group">
+                <label>上传文件</label>
+                <div class="file-upload" id="fileUpload">
+                    <div class="file-upload-icon">📁</div>
+                    <div class="file-upload-text">点击或拖拽文件到此处上传</div>
+                    <div class="file-upload-text" style="font-size: 12px; margin-top: 5px;">支持 Excel、CSV 等格式</div>
+                    <input type="file" id="multipartFile" name="multipartFile" accept=".xlsx,.xls,.csv">
+                </div>
+                <div class="file-name" id="fileName"></div>
+            </div>
+
+            <div class="form-group">
+                <label for="name">图表名称</label>
+                <input type="text" id="name" name="name" required placeholder="请输入图表名称">
+            </div>
+
+            <div class="form-group">
+                <label for="goal">分析目标</label>
+                <textarea id="goal" name="goal" required placeholder="请描述您的分析目标，例如：分析销售数据趋势、对比各部门业绩等"></textarea>
+            </div>
+
+            <div class="form-group">
+                <label for="chartType">图表类型</label>
+                <select id="chartType" name="chartType" required>
+                    <option value="">请选择图表类型</option>
+                    <option value="line">折线图</option>
+                    <option value="bar">柱状图</option>
+                    <option value="pie">饼图</option>
+                    <option value="area">面积图</option>
+                    <option value="scatter">散点图</option>
+                    <option value="radar">雷达图</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn" id="submitBtn">生成图表</button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">AI正在分析数据并生成图表，请稍候...</div>
+            <div class="loading-status" id="loadingStatus"></div>
+        </div>
+
+        <div class="chart-container" id="chartContainer">
+            <h3 id="chartTitle">图表结果</h3>
+            <div id="chart"></div>
+            <div class="analysis-result" id="analysisResult">
+                <h4>分析结论</h4>
+                <p id="analysisText"></p>
+            </div>
+        </div>
+
+        <div class="links">
+            <a href="login.html">返回登录</a>
+            <a href="#" id="logoutBtn">退出登录</a>
+        </div>
+    </div>
+
+    <script>
+        const chartForm = document.getElementById('chartForm');
+        const fileUpload = document.getElementById('fileUpload');
+        const fileInput = document.getElementById('multipartFile');
+        const fileName = document.getElementById('fileName');
+        const messageDiv = document.getElementById('message');
+        const submitBtn = document.getElementById('submitBtn');
+        const loading = document.getElementById('loading');
+        const loadingStatus = document.getElementById('loadingStatus');
+        const chartContainer = document.getElementById('chartContainer');
+        const chartTitle = document.getElementById('chartTitle');
+        const analysisResult = document.getElementById('analysisResult');
+        const analysisText = document.getElementById('analysisText');
+        const logoutBtn = document.getElementById('logoutBtn');
+
+        let currentFileTaskId = null;
+        let currentFingerprint = null;
+        let pollInterval = null;
+        let myChart = null;
+
+        function showMessage(message, type) {
+            messageDiv.textContent = message;
+            messageDiv.className = 'message ' + type;
+            messageDiv.style.display = 'block';
+            setTimeout(() => {
+                messageDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        fileUpload.addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        fileUpload.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileUpload.style.borderColor = '#667eea';
+            fileUpload.style.backgroundColor = '#f8f9ff';
+        });
+
+        fileUpload.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            fileUpload.style.borderColor = '#ddd';
+            fileUpload.style.backgroundColor = 'transparent';
+        });
+
+        fileUpload.addEventListener('drop', (e) => {
+            e.preventDefault();
+            fileUpload.style.borderColor = '#ddd';
+            fileUpload.style.backgroundColor = 'transparent';
+
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                fileName.textContent = '已选择: ' + files[0].name;
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                fileName.textContent = '已选择: ' + e.target.files[0].name;
+            }
+        });
+
+        function stopPolling() {
+            if (pollInterval) {
+                clearInterval(pollInterval);
+                pollInterval = null;
+            }
+        }
+
+        async function pollFileTaskStatus(fileTaskId) {
+            try {
+                const response = await fetch(`/api/chart/fileTask/${fileTaskId}`);
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    const taskStatus = result.data;
+                    loadingStatus.textContent = `当前状态: ${taskStatus.status}`;
+
+                    if (taskStatus.status === 'SUCCEEDED') {
+                        stopPolling();
+                        currentFingerprint = taskStatus.fingerprint;
+                        await fetchChartResult(taskStatus.fingerprint);
+                    } else if (taskStatus.status === 'FAILED') {
+                        stopPolling();
+                        submitBtn.disabled = false;
+                        loading.style.display = 'none';
+                        showMessage('文件解析失败: ' + (taskStatus.errorMsg || '未知错误'), 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('查询任务状态失败:', error);
+            }
+        }
+
+        async function fetchChartResult(fingerprint) {
+            try {
+                const response = await fetch(`/api/chart/result/${fingerprint}`);
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    const chartResult = result.data;
+
+                    if (chartResult.status === 'COMPLETED') {
+                        submitBtn.disabled = false;
+                        loading.style.display = 'none';
+                        chartForm.style.display = 'none';
+
+                        chartTitle.textContent = document.getElementById('name').value || '图表结果';
+                        
+                        const chartData = chartResult.echartsCode || chartResult.chartConfig;
+                        displayChart(chartData);
+                        analysisText.textContent = chartResult.analysisResult || '暂无分析结论';
+                        chartContainer.style.display = 'block';
+                    } else if (chartResult.status === 'PENDING') {
+                        loadingStatus.textContent = 'AI正在生成图表，请稍候...';
+                        setTimeout(() => fetchChartResult(fingerprint), 2000);
+                    } else {
+                        submitBtn.disabled = false;
+                        loading.style.display = 'none';
+                        showMessage('图表生成失败', 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('获取图表结果失败:', error);
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
+                showMessage('获取图表结果失败', 'error');
+            }
+        }
+
+        function displayChart(echartsCode) {
+            try {
+                if (myChart) {
+                    myChart.dispose();
+                }
+
+                const chartDom = document.getElementById('chart');
+                myChart = echarts.init(chartDom);
+
+                let option;
+                if (typeof echartsCode === 'string') {
+                    option = JSON.parse(echartsCode);  // ✅ 安全解析
+                } else {
+                    option = echartsCode;  // ✅ 直接使用对象
+                }
+                // ✅ 修复：转换小写字段名为标准 ECharts 字段名
+                if (option.xaxis) {
+                    option.xAxis = option.xaxis;
+                    delete option.xaxis;
+                }
+                if (option.yaxis) {
+                    option.yAxis = option.yaxis;
+                    delete option.yaxis;
+                }
+
+                myChart.setOption(option);
+
+                window.addEventListener('resize', () => {
+                    myChart.resize();
+                });
+            } catch (error) {
+                console.error('渲染图表失败:', error);
+                showMessage('图表渲染失败，请检查数据格式', 'error');
+            }
+        }
+
+        chartForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const file = fileInput.files[0];
+            if (!file) {
+                showMessage('请上传文件', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('multipartFile', file);
+            formData.append('name', document.getElementById('name').value);
+            formData.append('goal', document.getElementById('goal').value);
+            formData.append('chartType', document.getElementById('chartType').value);
+
+            submitBtn.disabled = true;
+            loading.style.display = 'block';
+            loadingStatus.textContent = '正在上传文件...';
+            chartContainer.style.display = 'none';
+
+            try {
+                const response = await fetch('/api/chart/aiChartMQApache2', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (result.code === 0) {
+                    const taskId = result.data;
+                    if (taskId.startsWith('FILE_PARSE_INITIATED:')) {
+                        currentFileTaskId = taskId.replace('FILE_PARSE_INITIATED:', '');
+                        loadingStatus.textContent = '文件解析任务已提交，正在处理...';
+
+                        pollInterval = setInterval(() => {
+                            pollFileTaskStatus(currentFileTaskId);
+                        }, 2000);
+                    } else {
+                        showMessage('图表生成任务已提交！', 'success');
+                        chartForm.reset();
+                        fileName.textContent = '';
+                        submitBtn.disabled = false;
+                        loading.style.display = 'none';
+                    }
+                } else {
+                    showMessage(result.message || '生成失败', 'error');
+                    submitBtn.disabled = false;
+                    loading.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('提交任务失败:', error);
+                showMessage('网络错误，请稍后重试', 'error');
+                submitBtn.disabled = false;
+                loading.style.display = 'none';
+            }
+        });
+
+        logoutBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            stopPolling();
+            try {
+                const response = await fetch('/api/user/logout', {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                if (result.code === 0) {
+                    showMessage('已退出登录', 'success');
+                    setTimeout(() => {
+                        window.location.href = 'login.html';
+                    }, 1000);
+                }
+            } catch (error) {
+                showMessage('退出失败', 'error');
+            }
+        });
+
+        window.addEventListener('beforeunload', () => {
+            stopPolling();
+        });
+    </script>
+</body>
+</html>

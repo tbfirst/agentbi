@@ -33,4 +33,16 @@ public class ChartController {
         userService.getLoginUser();
         return ResultUtils.success(chartService.genChartByAiMQApache2(multipartFile, generateChartByAiRequest, request));
     }
+
+    @GetMapping("/fileTask/{fileTaskId}")
+    public BaseResponse<FileTaskStatusResponse> getFileTaskStatus(@PathVariable String fileTaskId) {
+        userService.getLoginUser();
+        return ResultUtils.success(chartService.getFileTaskStatus(fileTaskId));
+    }
+
+    @GetMapping("/result/{fingerprint}")
+    public BaseResponse<ChartResultResponse> getChartResult(@PathVariable String fingerprint) {
+        userService.getLoginUser();
+        return ResultUtils.success(chartService.getChartResultByFingerprint(fingerprint));
+    }
 }

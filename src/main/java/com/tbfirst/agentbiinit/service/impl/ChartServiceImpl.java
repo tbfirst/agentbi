@@ -1,16 +1,20 @@
 package com.tbfirst.agentbiinit.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.tbfirst.agentbiinit.common.ErrorCode;
 import com.tbfirst.agentbiinit.config.RabbitConfig;
 import com.tbfirst.agentbiinit.exception.BusinessException;
 import com.tbfirst.agentbiinit.manager.RedissonLimitManager;
 import com.tbfirst.agentbiinit.mapper.ChartMapper;
 import com.tbfirst.agentbiinit.mapper.FileTaskMapper;
+import com.tbfirst.agentbiinit.model.dto.chart.ChartResultResponse;
 import com.tbfirst.agentbiinit.model.dto.chart.GenerateChartByAiRequest;
 import com.tbfirst.agentbiinit.model.entity.*;
 import com.tbfirst.agentbiinit.model.enums.AiRedisEnum;
+import com.tbfirst.agentbiinit.model.vo.AiAnalysisVO;
 import com.tbfirst.agentbiinit.service.ChartService;
 import com.tbfirst.agentbiinit.utils.*;
 import jakarta.servlet.http.HttpServletRequest;
@@ -32,6 +36,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import com.tbfirst.agentbiinit.model.dto.chart.FileTaskStatusResponse;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -237,7 +242,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 memoryId = userId + "-chat";
                 httpRequest.setAttribute("memoryId", memoryId);
             }
-            // 1.1 检查一级缓存：只存指针和时间戳
+            // 1.1 检查一级缓存：只存历史缓存指针和时间戳
             String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
             String pointer = redisTemplate.opsForValue().get(cacheKey);
             if (pointer != null) {
@@ -262,7 +267,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 // 预热：复制到L1，重置1小时TTL（重建L1指针）
                 // L1：存指针+时间戳（约100字节，1小时）
                 String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
-                pointer = cacheKey + "|" + System.currentTimeMillis();
+                pointer = historyKey + "|" + System.currentTimeMillis();
                 redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
                 return resultJson;
             }
@@ -412,6 +417,88 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    public FileTaskStatusResponse getFileTaskStatus(String fileTaskId) {
+        QueryWrapper<FileTaskInfo> queryWrapper = new QueryWrapper<>();
+        queryWrapper.eq("file_task_id", fileTaskId);
+        FileTaskInfo fileTaskInfo = fileTaskMapper.selectOne(queryWrapper);
+
+        if (fileTaskInfo == null) {
+            throw new BusinessException(ErrorCode.PARAMS_ERROR, "文件任务不存在");
+        }
+
+        FileTaskStatusResponse response = new FileTaskStatusResponse();
+        response.setFileTaskId(fileTaskInfo.getFileTaskId());
+        response.setStatus(fileTaskInfo.getStatus());
+        response.setFingerprint(fileTaskInfo.getFingerprint());
+        response.setCsvUrl(fileTaskInfo.getCsvUrl());
+        response.setErrorMsg(fileTaskInfo.getErrorMsg());
+        response.setParseTimeMs(fileTaskInfo.getParseTimeMs());
+        response.setFileSize(fileTaskInfo.getFileSize());
+        response.setCsvSize(fileTaskInfo.getCsvSize());
+
+        return response;
+    }
+
+    @Override
+    public ChartResultResponse getChartResultByFingerprint(String fingerprint) {
+        ChartResultResponse response = new ChartResultResponse();
+        response.setStatus("PENDING");
+
+        String cacheKey = AiRedisEnum.CHART_RESULT.getValue() + fingerprint;
+        String pointer = redisTemplate.opsForValue().get(cacheKey);
+
+        if (pointer != null) {
+            String historyKey = pointer.split("\\|")[0];
+            String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
+
+            if (resultJson != null) {
+                try {
+                    AiAnalysisVO analysisVO = objectMapper.readValue(resultJson, AiAnalysisVO.class);
+                    response.setChartConfig(analysisVO.getChartConfig());
+                    // 转换 ECharts 配置字段名大小写
+                    ObjectNode chartConfig = (ObjectNode) objectMapper.valueToTree(analysisVO.getChartConfig());
+                    if (chartConfig.has("xaxis")) {
+                        chartConfig.set("xAxis", chartConfig.get("xaxis"));
+                        chartConfig.remove("xaxis");
+                    }
+                    if (chartConfig.has("yaxis")) {
+                        chartConfig.set("yAxis", chartConfig.get("yaxis"));
+                        chartConfig.remove("yaxis");
+                    }
+                    String chartConfigJson = objectMapper.writeValueAsString(chartConfig);
+                    response.setEchartsCode(chartConfigJson);
+                    
+                    StringBuilder analysisBuilder = new StringBuilder();
+                    analysisBuilder.append("**整体概况：\n").append(analysisVO.getAnalysis().getSummary()).append("\n\n");
+                    
+                    if (analysisVO.getAnalysis().getKeyFindings() != null && !analysisVO.getAnalysis().getKeyFindings().isEmpty()) {
+                        analysisBuilder.append("**关键发现：\n");
+                        for (int i = 0; i < analysisVO.getAnalysis().getKeyFindings().size(); i++) {
+                            analysisBuilder.append((i + 1)).append(". ").append(analysisVO.getAnalysis().getKeyFindings().get(i)).append("\n");
+                        }
+                        analysisBuilder.append("\n");
+                    }
+                    
+                    if (analysisVO.getAnalysis().getSuggestions() != null && !analysisVO.getAnalysis().getSuggestions().isEmpty()) {
+                        analysisBuilder.append("**优化建议：\n");
+                        for (int i = 0; i < analysisVO.getAnalysis().getSuggestions().size(); i++) {
+                            analysisBuilder.append((i + 1)).append(". ").append(analysisVO.getAnalysis().getSuggestions().get(i)).append("\n");
+                        }
+                    }
+                    
+                    response.setAnalysisResult(analysisBuilder.toString());
+                    response.setStatus("COMPLETED");
+                } catch (Exception e) {
+                    log.error("解析图表结果失败", e);
+                    response.setStatus("ERROR");
+                }
+            }
+        }
+
+        return response;
     }
 }
 
