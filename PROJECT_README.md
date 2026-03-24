@@ -815,6 +815,8 @@ com.tbfirst.agentbiinit
 - **包名：** 全小写点分隔（lower.case）
 
 ---
+## 项目简单展示
+<img width="1353" height="1469" alt="image" src="https://github.com/user-attachments/assets/4bb515bd-4dd9-4834-b330-1209b8b0d1ff" />
 
 ## 🔍 常见问题
 
