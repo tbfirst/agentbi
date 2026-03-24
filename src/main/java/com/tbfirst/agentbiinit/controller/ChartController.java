@@ -27,7 +27,7 @@ public class ChartController {
     private ChartService chartService;
 
     @PostMapping("/aiChartMQApache2")
-    public BaseResponse<String> genChartByAiMQApache2(@RequestPart("multipartFile") MultipartFile multipartFile,
+    public BaseResponse<ChartResultResponse> genChartByAiMQApache2(@RequestPart("multipartFile") MultipartFile multipartFile,
                                                     GenerateChartByAiRequest generateChartByAiRequest,
                                                     HttpServletRequest request) {
         userService.getLoginUser();

@@ -9,4 +9,6 @@ public class ChartResultResponse {
     private String echartsCode;
     private String analysisResult;
     private String status;
+    private String fingerprint;
+    private String fileTaskId;
 }

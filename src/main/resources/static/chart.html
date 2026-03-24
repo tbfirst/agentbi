@@ -401,7 +401,7 @@
             }
         }
 
-        async function pollFileTaskStatus(fileTaskId) {
+        async function pollFileTaskStatus(fileTaskId, fingerprint) {
             try {
                 const response = await fetch(`/api/chart/fileTask/${fileTaskId}`);
                 const result = await response.json();
@@ -412,8 +412,7 @@
 
                     if (taskStatus.status === 'SUCCEEDED') {
                         stopPolling();
-                        currentFingerprint = taskStatus.fingerprint;
-                        await fetchChartResult(taskStatus.fingerprint);
+                        await fetchChartResult(fingerprint);
                     } else if (taskStatus.status === 'FAILED') {
                         stopPolling();
                         submitBtn.disabled = false;
@@ -498,6 +497,19 @@
             }
         }
 
+        function renderChart(chartResult) {
+            submitBtn.disabled = false;
+            loading.style.display = 'none';
+            chartForm.style.display = 'none';
+
+            chartTitle.textContent = document.getElementById('name').value || '图表结果';
+            
+            const chartData = chartResult.echartsCode || chartResult.chartConfig;
+            displayChart(chartData);
+            analysisText.textContent = chartResult.analysisResult || '暂无分析结论';
+            chartContainer.style.display = 'block';
+        }
+
         chartForm.addEventListener('submit', async (e) => {
             e.preventDefault();
 
@@ -527,18 +539,25 @@
                 const result = await response.json();
 
                 if (result.code === 0) {
-                    const taskId = result.data;
-                    if (taskId.startsWith('FILE_PARSE_INITIATED:')) {
-                        currentFileTaskId = taskId.replace('FILE_PARSE_INITIATED:', '');
+                    const chartResult = result.data;
+                    
+                    if (chartResult.status === 'COMPLETED') {
+                        loadingStatus.textContent = '图表生成完成！';
+                        renderChart(chartResult);
+                        chartForm.reset();
+                        fileName.textContent = '';
+                        submitBtn.disabled = false;
+                        loading.style.display = 'none';
+                    } else if (chartResult.status === 'PENDING') {
+                        currentFileTaskId = chartResult.fileTaskId;
+                        currentFingerprint = chartResult.fingerprint;
                         loadingStatus.textContent = '文件解析任务已提交，正在处理...';
 
                         pollInterval = setInterval(() => {
-                            pollFileTaskStatus(currentFileTaskId);
+                            pollFileTaskStatus(currentFileTaskId, currentFingerprint);
                         }, 2000);
                     } else {
-                        showMessage('图表生成任务已提交！', 'success');
-                        chartForm.reset();
-                        fileName.textContent = '';
+                        showMessage('任务状态异常：' + chartResult.status, 'error');
                         submitBtn.disabled = false;
                         loading.style.display = 'none';
                     }

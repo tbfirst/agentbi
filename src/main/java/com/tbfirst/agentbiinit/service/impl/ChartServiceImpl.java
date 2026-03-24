@@ -228,7 +228,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
 
     // 版本九：在八的基础上，修改多级缓存配置
     @Override
-    public String genChartByAiMQApache2(MultipartFile multipartFile,
+    public ChartResultResponse genChartByAiMQApache2(MultipartFile multipartFile,
                                         GenerateChartByAiRequest generateChartByAiRequest,
                                         HttpServletRequest httpRequest) {
         try {
@@ -236,7 +236,6 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             String fingerprint = generateFingerprint(multipartFile, generateChartByAiRequest);
             UserEntity loginUser = userService.getLoginUser();
             String userId = String.valueOf(loginUser.getId());
-            // 从 HttpServletRequest 获取 memoryId（如果没有则生成，保持和 MyRedisChatMemoryProvider 中的生成逻辑一致）
             String memoryId = (String) httpRequest.getAttribute("memoryId");
             if (memoryId == null) {
                 memoryId = userId + "-chat";
@@ -248,8 +247,8 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             if (pointer != null) {
                 log.info("命中结果缓存，直接返回");
                 String historyKey = pointer.split("\\|")[0];
-                String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");  // 取真实数据
-                return resultJson;
+                String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
+                return buildChartResultFromJson(resultJson);
             }
             // 1.2 【布隆过滤器】快速判断是否可能存在
             // false = 肯定不存在，避免查数据库，直接去检查文件，上传文件以及之后的流程
@@ -269,7 +268,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
                 pointer = historyKey + "|" + System.currentTimeMillis();
                 redisTemplate.opsForValue().set(cacheKey, pointer, 1, TimeUnit.HOURS);
-                return resultJson;
+                return buildChartResultFromJson(resultJson);
             }
             // 1.4 布隆误判了（假阳性），实际不存在
             log.warn("布隆过滤器误判: {}", fingerprint);
@@ -280,7 +279,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "请求超时");
         }
     }
-    private String processNewFile(MultipartFile multipartFile,
+    private ChartResultResponse processNewFile(MultipartFile multipartFile,
                                   String fingerprint,
                                   String cacheKey,
                                   String pointer,
@@ -325,7 +324,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
                 if (pointer != null) {
                     String historyKey = pointer.split("\\|")[0];
                     String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
-                    return resultJson != null ? resultJson : "COMPLETED";
+                    if (resultJson != null) {
+                        return buildChartResultFromJson(resultJson);
+                    }
                 }
             }
             throw new BusinessException(ErrorCode.SYSTEM_ERROR, "系统异常，请稍后重试");
@@ -337,7 +338,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             if (pointer != null) {
                 String historyKey = pointer.split("\\|")[0];
                 String resultJson = (String) redisTemplate.opsForHash().get(historyKey, "1");
-                return resultJson != null ? resultJson : "COMPLETED";
+                if (resultJson != null) {
+                    return buildChartResultFromJson(resultJson);
+                }
             }
 
             // 6. 限流（在提交任务前执行，避免任务堆积）
@@ -372,9 +375,12 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             // 【关键】该文件解析内部会执行 rabbitmq 的异步调用 ai 服务
             self.submitFileTaskAsync(fileTaskId, ossUrl, task, userId, fingerprint, generateChartByAiRequest, memoryId);
 
-            // 8. 异步文件解析后调用 ai 服务
-            // 告诉用户"文件正在解析，AI 任务将在解析完成后自动触发"
-            return "FILE_PARSE_INITIATED:" + fileTaskId;
+            // 8. 返回任务已提交响应，AI在后台运行
+            ChartResultResponse response = new ChartResultResponse();
+            response.setStatus("PENDING");
+            response.setFingerprint(fingerprint);
+            response.setFileTaskId(fileTaskId);
+            return response;
         } finally {
             lock.unlock();
         }
@@ -498,6 +504,54 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             }
         }
 
+        return response;
+    }
+
+    private ChartResultResponse buildChartResultFromJson(String resultJson) {
+        ChartResultResponse response = new ChartResultResponse();
+        response.setStatus("COMPLETED");
+        
+        try {
+            AiAnalysisVO analysisVO = objectMapper.readValue(resultJson, AiAnalysisVO.class);
+            response.setChartConfig(analysisVO.getChartConfig());
+            
+            // 转换 ECharts 配置字段名大小写
+            ObjectNode chartConfig = (ObjectNode) objectMapper.valueToTree(analysisVO.getChartConfig());
+            if (chartConfig.has("xaxis")) {
+                chartConfig.set("xAxis", chartConfig.get("xaxis"));
+                chartConfig.remove("xaxis");
+            }
+            if (chartConfig.has("yaxis")) {
+                chartConfig.set("yAxis", chartConfig.get("yaxis"));
+                chartConfig.remove("yaxis");
+            }
+            String chartConfigJson = objectMapper.writeValueAsString(chartConfig);
+            response.setEchartsCode(chartConfigJson);
+            
+            StringBuilder analysisBuilder = new StringBuilder();
+            analysisBuilder.append("**整体概况：\n").append(analysisVO.getAnalysis().getSummary()).append("\n\n");
+            
+            if (analysisVO.getAnalysis().getKeyFindings() != null && !analysisVO.getAnalysis().getKeyFindings().isEmpty()) {
+                analysisBuilder.append("**关键发现：\n");
+                for (int i = 0; i < analysisVO.getAnalysis().getKeyFindings().size(); i++) {
+                    analysisBuilder.append((i + 1)).append(". ").append(analysisVO.getAnalysis().getKeyFindings().get(i)).append("\n");
+                }
+                analysisBuilder.append("\n");
+            }
+            
+            if (analysisVO.getAnalysis().getSuggestions() != null && !analysisVO.getAnalysis().getSuggestions().isEmpty()) {
+                analysisBuilder.append("**优化建议：\n");
+                for (int i = 0; i < analysisVO.getAnalysis().getSuggestions().size(); i++) {
+                    analysisBuilder.append((i + 1)).append(". ").append(analysisVO.getAnalysis().getSuggestions().get(i)).append("\n");
+                }
+            }
+            
+            response.setAnalysisResult(analysisBuilder.toString());
+        } catch (Exception e) {
+            log.error("构建图表结果失败", e);
+            response.setStatus("ERROR");
+        }
+        
         return response;
     }
 }

@@ -19,7 +19,7 @@ public interface ChartService extends IService<ChartEntity> {
      * 根据用户上传的图表数据生成图表,先对文件进行多重校验，之后才使用阿里云oss 存储用户文件
      * 【rabbitmq 异步调用 ai，异步线程池处理文件解析】
      */
-    String genChartByAiMQApache2(MultipartFile multipartFile, GenerateChartByAiRequest generateChartByAiRequest, HttpServletRequest request);
+    ChartResultResponse genChartByAiMQApache2(MultipartFile multipartFile, GenerateChartByAiRequest generateChartByAiRequest, HttpServletRequest request);
 
     /**
      * 查询文件解析任务状态
