@@ -171,7 +171,14 @@ volumes:  # 声明命名卷
 
 ```bash
 docker compose up -d
+
+# 验证是否创建成功
+docker ps
+# 当然如果失败了也可以通过docker logs
 ```
+<img width="2880" height="1245" alt="image" src="https://github.com/user-attachments/assets/59c5e3e2-ee66-4356-b700-fe7499fa8f98" />
+
+
 
 5\. 创建集群
 
@@ -183,16 +190,9 @@ docker exec -it redis-7000 redis-cli -p 7000 PING
 # 创建集群
 docker exec -it redis-7000 redis-cli --cluster create   redis-7000:7000 redis-7001:7001 redis-7002:7002   redis-7003:7003 redis-7004:7004 redis-7005:7005   --cluster-replicas 1
 ```
+<img width="2880" height="1643" alt="image" src="https://github.com/user-attachments/assets/474dde61-820f-4616-92be-7f8dca9122a4" />
 
-
-6\. 验证集群
-```bash
-docker exec -it redis-7000 redis-cli -c -p 7000 CLUSTER INFO
-
-for port in 7003 7004 7005; do   echo "Slave $port:";   docker exec redis-$port redis-cli -p $port INFO replication | grep master_link_status; done
-```
-
-7\. 修改hosts文件
+6\. 修改hosts文件
 
 以管理员身份运行hosts文件，添加以下内容即可：
 ```bash
@@ -204,3 +204,12 @@ for port in 7003 7004 7005; do   echo "Slave $port:";   docker exec redis-$port 
 127.0.0.1 redis-7004
 127.0.0.1 redis-7005
 ```
+
+7\. 验证集群
+```bash
+docker exec -it redis-7000 redis-cli -c -p 7000 CLUSTER INFO
+
+for port in 7003 7004 7005; do   echo "Slave $port:";   docker exec redis-$port redis-cli -p $port INFO replication | grep master_link_status; done
+```
+<img width="2391" height="1044" alt="image" src="https://github.com/user-attachments/assets/ca91459f-1d32-4716-9208-ed76b515d595" />
+
