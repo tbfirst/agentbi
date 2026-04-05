@@ -699,7 +699,7 @@ UserService.logout()
 
 ## ⚙️ 配置说明
 
-### application-dev.yml
+### application.yml
 
 主要配置项：
 
@@ -712,14 +712,49 @@ spring:
   
   data:
     redis:
+      # 单机模式配置（默认）
       host: localhost
       port: 6379
+      database: 2
+      password: "123456"
+      timeout: 3000ms
+      
+      # 集群模式配置（启用时需注释掉单机配置）
+      # cluster:
+      #   enabled: true
+      #   nodes: 127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003,127.0.0.1:7004,127.0.0.1:7005
+      #   max-redirects: 3
+      
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+          max-wait: -1ms
   
   rabbitmq:
     host: localhost
     port: 5672
     username: guest
     password: guest
+
+# 布隆过滤器配置
+bloom:
+  filter:
+    expected-insertions: 1000000    # 预期插入数据量
+    false-probability: 0.001        # 误判率
+    warm-up-days: 30                # 预热最近30天的数据
+
+# 缓存防护配置
+cache:
+  cleanup:
+    retention-days: 30              # 数据保留天数
+    batch-size: 1000                # 批量处理大小
+    cron: "0 0 2 * * ?"             # 清理任务执行时间
+  archive:
+    cron: "0 0 3 1 * ?"             # 归档任务执行时间
+  rebuild-index:
+    cron: "0 0 4 * * ?"             # 索引重建时间
 
 aliyun:
   oss:
@@ -730,6 +765,283 @@ aliyun:
 
 dashscope:
   api-key: your-dashscope-api-key
+```
+
+---
+
+## 🔧 Redis分片集群配置与验证
+
+### 1. 集群架构说明
+
+Redis分片集群采用无中心架构，数据自动分片到多个节点：
+
+```
+┌─────────────────────────────────────────────────────┐
+│              Redis Cluster 架构                      │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│  ┌─────────┐    ┌─────────┐    ┌─────────┐        │
+│  │ Master1 │    │ Master2 │    │ Master3 │        │
+│  │ slot    │    │ slot    │    │ slot    │        │
+│  │ 0-5460  │    │ 5461-   │    │ 10923-  │        │
+│  │         │    │ 10922   │    │ 16383   │        │
+│  └────┬────┘    └────┬────┘    └────┬────┘        │
+│       │              │              │              │
+│  ┌────┴────┐    ┌────┴────┐    ┌────┴────┐        │
+│  │ Slave1  │    │ Slave2  │    │ Slave3  │        │
+│  └─────────┘    └─────────┘    └─────────┘        │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+**核心特性：**
+- 数据自动分片到16384个槽位
+- 主从复制保证高可用
+- 自动故障转移
+- 拓扑自动发现
+
+### 2. 集群部署步骤
+
+#### 2.1 创建集群目录
+
+```bash
+# 创建集群节点目录
+mkdir -p /opt/redis-cluster/{7000,7001,7002,7003,7004,7005}
+```
+
+#### 2.2 配置节点
+
+每个节点的 `redis.conf` 配置：
+
+```conf
+# redis-7000.conf 示例
+port 7000
+cluster-enabled yes
+cluster-config-file nodes-7000.conf
+cluster-node-timeout 5000
+appendonly yes
+daemonize yes
+pidfile /var/run/redis_7000.pid
+logfile /var/log/redis_7000.log
+dir /opt/redis-cluster/7000
+bind 0.0.0.0
+protected-mode no
+```
+
+#### 2.3 启动节点
+
+```bash
+# 启动所有节点
+redis-server /opt/redis-cluster/7000/redis.conf
+redis-server /opt/redis-cluster/7001/redis.conf
+redis-server /opt/redis-cluster/7002/redis.conf
+redis-server /opt/redis-cluster/7003/redis.conf
+redis-server /opt/redis-cluster/7004/redis.conf
+redis-server /opt/redis-cluster/7005/redis.conf
+```
+
+#### 2.4 创建集群
+
+```bash
+# 使用 redis-cli 创建集群
+redis-cli --cluster create \
+  127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002 \
+  127.0.0.1:7003 127.0.0.1:7004 127.0.0.1:7005 \
+  --cluster-replicas 1
+```
+
+### 3. 集群验证方法
+
+#### 3.1 基础连接验证
+
+```bash
+# 连接集群任意节点
+redis-cli -c -h 127.0.0.1 -p 7000
+
+# 查看集群状态
+127.0.0.1:7000> CLUSTER INFO
+# 预期输出：cluster_state:ok
+
+# 查看节点信息
+127.0.0.1:7000> CLUSTER NODES
+# 预期输出：显示所有主从节点信息
+```
+
+#### 3.2 数据分片验证
+
+```bash
+# 连接集群
+redis-cli -c -p 7000
+
+# 设置测试数据
+127.0.0.1:7000> SET test:key1 "value1"
+# 观察自动重定向到正确的槽位节点
+
+# 获取数据
+127.0.0.1:7000> GET test:key1
+"value1"
+
+# 查看key所在槽位
+127.0.0.1:7000> CLUSTER KEYSLOT test:key1
+(integer) 15239
+```
+
+#### 3.3 故障转移验证
+
+```bash
+# 1. 查看当前主节点
+redis-cli -p 7000 CLUSTER NODES | grep master
+
+# 2. 手动停止一个主节点（模拟故障）
+redis-cli -p 7000 DEBUG SEGFAULT
+# 或直接 kill 进程
+
+# 3. 等待30秒后检查集群状态
+redis-cli -p 7001 CLUSTER INFO
+# 预期输出：cluster_state:ok（已自动故障转移）
+
+# 4. 验证数据仍然可访问
+redis-cli -c -p 7001 GET test:key1
+```
+
+#### 3.4 应用层验证
+
+**方式一：日志验证**
+
+启动应用后查看日志：
+
+```log
+# 预期日志输出
+INFO  RedisClusterConfig - 初始化Redis分片集群连接工厂...
+INFO  RedisClusterConfig - Redis分片集群连接工厂初始化完成，节点数: 6
+INFO  RedisClusterConfig - RedisTemplate初始化完成，使用GenericJackson2JsonRedisSerializer序列化器
+```
+
+**方式二：接口测试**
+
+```bash
+# 1. 登录获取Session
+curl -X POST http://localhost:8080/api/user/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"123456"}'
+
+# 2. 上传文件生成图表
+curl -X POST http://localhost:8080/api/chart/aiChartMQApache2 \
+  -F "multipartFile=@test.csv" \
+  -F "name=测试图表" \
+  -F "goal=分析数据趋势" \
+  -F "chartType=折线图"
+
+# 3. 查看Redis集群数据分布
+redis-cli -c -p 7000 KEYS "*"
+```
+
+**方式三：监控脚本**
+
+```bash
+#!/bin/bash
+# cluster_health_check.sh
+
+echo "=== Redis Cluster Health Check ==="
+
+for port in 7000 7001 7002 7003 7004 7005; do
+    echo "\n--- Node $port ---"
+    redis-cli -p $port PING
+    redis-cli -p $port INFO replication | grep -E "role|connected_slaves"
+done
+
+echo "\n--- Cluster Status ---"
+redis-cli -p 7000 CLUSTER INFO | grep -E "cluster_state|cluster_slots_assigned|cluster_slots_ok"
+
+echo "\n--- Data Distribution ---"
+redis-cli -p 7000 CLUSTER NODES | grep -E "master|slave" | awk '{print $2, $3, $4}'
+```
+
+### 4. 性能测试
+
+#### 4.1 基准测试
+
+```bash
+# 使用 redis-benchmark
+redis-benchmark -h 127.0.0.1 -p 7000 -c 100 -n 100000 -t set,get
+
+# 预期结果
+# SET: 100000 requests completed in 1.23 seconds
+# GET: 100000 requests completed in 1.15 seconds
+```
+
+#### 4.2 集群吞吐量测试
+
+```bash
+# 多节点并发测试
+redis-benchmark -h 127.0.0.1 -p 7000 -c 500 -n 500000 -t set,get &
+redis-benchmark -h 127.0.0.1 -p 7001 -c 500 -n 500000 -t set,get &
+redis-benchmark -h 127.0.0.1 -p 7002 -c 500 -n 500000 -t set,get &
+wait
+```
+
+### 5. 常见问题排查
+
+#### 5.1 连接超时
+
+```bash
+# 检查防火墙
+sudo firewall-cmd --list-ports
+
+# 开放端口
+sudo firewall-cmd --add-port=7000-7005/tcp --permanent
+sudo firewall-cmd --reload
+```
+
+#### 5.2 槽位未分配
+
+```bash
+# 检查槽位分配
+redis-cli -p 7000 CLUSTER INFO | grep cluster_slots_assigned
+
+# 如果槽位未完全分配，重新分配
+redis-cli --cluster fix 127.0.0.1:7000
+```
+
+#### 5.3 节点通信失败
+
+```bash
+# 检查节点握手状态
+redis-cli -p 7000 CLUSTER NODES
+
+# 手动添加节点
+redis-cli --cluster add-node 127.0.0.1:7006 127.0.0.1:7000
+```
+
+### 6. 配置切换
+
+**单机模式 → 集群模式：**
+
+```yaml
+# application.yml
+spring:
+  data:
+    redis:
+      # 注释单机配置
+      # host: localhost
+      # port: 6379
+      
+      # 启用集群配置
+      cluster:
+        enabled: true
+        nodes: 127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003,127.0.0.1:7004,127.0.0.1:7005
+        max-redirects: 3
+```
+
+**验证切换成功：**
+
+```bash
+# 查看应用日志
+tail -f logs/application.log | grep -i "cluster"
+
+# 预期输出
+INFO RedisClusterConfig - 初始化Redis分片集群连接工厂...
+INFO RedisClusterConfig - Redis分片集群连接工厂初始化完成，节点数: 6
 ```
 
 ---

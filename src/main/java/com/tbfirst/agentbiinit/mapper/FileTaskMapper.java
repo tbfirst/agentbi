@@ -19,7 +19,6 @@ public interface FileTaskMapper extends BaseMapper<FileTaskInfo> {
     @Select("SELECT * FROM file_task_info WHERE file_task_id = #{fileTaskId}")
     FileTaskInfo selectByFileTaskId(@Param("fileTaskId") String fileTaskId);
 
-    // todo 调用ai服务返回了任务ID，需要根据任务ID查询任务状态为SUCCEEDED，之后通过数据库中该条数据包含的指纹，去redis中查找信息
 }
 
 

@@ -1,8 +1,6 @@
 spring:
   application:
     name: agentbi
-  profiles:
-    active: dev
   # 支持 swagger3
   mvc:
     pathmatch:
@@ -18,10 +16,27 @@ spring:
   # todo 需替换配置
   data:
     redis:
-      host: localhost
-      port: 6379
-      database: 2
-      password: "123456"
+      # 单机模式配置（默认）
+#      host: localhost
+#      port: 6379
+#      database: 2
+#      password: "123456"
+#      timeout: 3000
+      # 集群模式配置（启用时需注释掉单机配置）
+      password: ""   # 集群无密码
+      timeout: 3000
+      cluster:
+        enabled: true     # 开启集群模式
+        # 配置分片集群的节点地址
+        nodes: 127.0.0.1:7000,127.0.0.1:7001,127.0.0.1:7002,127.0.0.1:7003,127.0.0.1:7004,127.0.0.1:7005
+        max-redirects: 3  # 最大重定向次数，即最大尝试次数
+      # 配置 lettuce 连接池
+      lettuce:
+        pool:
+          max-active: 8   # 最大连接数
+          max-idle: 8     # 最大空闲连接数
+          min-idle: 0     # 最小空闲连接数
+          max-wait: -1ms  # 最大等待时间，-1 表示无限等待
   # RabbitMQ 配置
   # todo 需替换配置，修改为自己的用户名密码虚拟主机等
   rabbitmq:
@@ -30,8 +45,8 @@ spring:
     username: bitestuser     # 用户名
     password: 123456    # 密码
     virtual-host: bitest # 虚拟主机
-  # 阿里云 OSS 存储
-  # todo 需替换配置，修改为自己的 accessKey、secretKey、region、bucket-name
+# 阿里云 OSS 存储
+# todo 需替换配置，修改为自己的 accessKey、secretKey、region、bucket-name
 aliyun:
   oss:
     # 由于我已经在系统环境中配置了 access-key-id 和 access-key-secret，故这里不需要明文配置，而是直接从环境变量中获取
@@ -86,3 +101,22 @@ ragflow:
   api-key: ${RAGFLOW_API_KEY}                       # RAGFlow API 密钥,从环境变量获取
   echarts-name: ${ECHARTS_NAME}                     # RAGFlow 知识库创建的数据集的唯一名称,从环境变量获取
   similarity-threshold: 0.7                         # RAGFlow 文档相似度阈值,默认值 0.75，具体根据多次测试后确定
+
+# 布隆过滤器配置
+bloom:
+  filter:
+    expected-insertions: 1000000                    # 预期插入数据量
+    false-probability: 0.001                        # 误判率
+    warm-up-days: 30                                # 预热最近30天的数据
+
+# 缓存防护配置
+cache:
+  cleanup:
+    retention-days: 30                              # 数据保留天数
+    batch-size: 1000                                # 批量处理大小
+    cron: "0 0 2 * * ?"                             # 清理任务执行时间（每天凌晨2点）
+  archive:
+    days: 90                    # 新增：归档数据保留天数
+    cron: "0 0 3 1 * ?"                             # 归档任务执行时间（每月1号凌晨3点）
+  rebuild-index:
+    cron: "0 0 4 * * ?"                             # 索引重建时间（每天凌晨4点）

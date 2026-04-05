@@ -16,6 +16,7 @@ import com.tbfirst.agentbiinit.model.entity.*;
 import com.tbfirst.agentbiinit.model.enums.AiRedisEnum;
 import com.tbfirst.agentbiinit.model.vo.AiAnalysisVO;
 import com.tbfirst.agentbiinit.service.ChartService;
+import com.tbfirst.agentbiinit.service.BloomFilterAsyncService;
 import com.tbfirst.agentbiinit.utils.*;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ import com.tbfirst.agentbiinit.model.dto.chart.FileTaskStatusResponse;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.Map;
+import java.util.Random;
 import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -80,6 +82,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
     @Autowired
     private UserService userService;
 
+    @Autowired
+    private BloomFilterAsyncService bloomFilterAsyncService;
+
     // 使用异步线程池处理文件解析
     @Async("fileParserExecutor")        // ← 关键注解，丢给对应线程池执行
     public CompletableFuture<String> submitFileTaskAsync(String fileTaskId,
@@ -109,6 +114,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             redisTemplate.opsForValue().set(redisKey, "PROCESSING", 5, TimeUnit.MINUTES);
 
             // 2. 【关键】执行文件解析任务
+            // todo 完成文件解析失败的重试机制，避免因为网络问题导致解析失败
             log.info("异步线程 {} 开始 OSS下载 → 解析 → OSS上传文件解析任务 {}", threadName, fileTaskId);
             String csvUrl = parseAndUploadToOss(ossUrl, fileTaskId);
 
@@ -308,7 +314,9 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         }
 
         // 4. 使用 Redisson分布式锁，防止并发重复调用
+        // todo redisson指纹优化，当前是基于文件指纹加锁，相同文件不同参数会竞争锁，但实际上应该并行处理；锁的粒度应该是 文件指纹 + 参数指纹 ，避免不必要的锁竞争
         String lockKey = AiRedisEnum.CHART_LOCK.getValue() + fingerprint;
+        // todo 高并发场景下redis将成为瓶颈，每次加锁/解锁需要网络往返（RTT），可使用本地锁（如ReentrantLock）配合分布式锁优化
         RLock lock = redissonClient.getLock(lockKey);
         boolean locked = false;
         try {
@@ -319,7 +327,8 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
         if (!locked) {
             // 未获取到锁，等待并重试（轮询缓存）
             for (int i = 0; i < 10; i++) {
-                Thread.sleep(300);
+                // 随机退避：避免所有线程同时重试（惊群效应），导致数据库压力过大
+                Thread.sleep(300 + new Random().nextInt(200)); // 随机300-500ms
                 pointer = redisTemplate.opsForValue().get(cacheKey);
                 if (pointer != null) {
                     String historyKey = pointer.split("\\|")[0];
@@ -374,6 +383,11 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             // Spring 代理机制：@Async 通过 AOP 代理实现，只有外部调用才会触发代理，同类自调用会绕过代理
             // 【关键】该文件解析内部会执行 rabbitmq 的异步调用 ai 服务
             self.submitFileTaskAsync(fileTaskId, ossUrl, task, userId, fingerprint, generateChartByAiRequest, memoryId);
+            // 7.4 【关键】异步添加指纹到布隆过滤器，防止后续缓存穿透
+            // 布隆过滤器作用：快速判断某个指纹是否"可能存在"，避免无效的数据库查询
+            // 注意：布隆过滤器存在误判（假阳性），但不会漏判
+            bloomFilterAsyncService.asyncAddToBloomFilter(fingerprint);
+            log.debug("已异步添加指纹到布隆过滤器: {}", fingerprint);
 
             // 8. 返回任务已提交响应，AI在后台运行
             ChartResultResponse response = new ChartResultResponse();
@@ -382,7 +396,10 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
             response.setFileTaskId(fileTaskId);
             return response;
         } finally {
-            lock.unlock();
+            // 只有成功获取锁后才解锁，避免 IllegalMonitorStateException
+            if (locked) {
+                lock.unlock();
+            }
         }
     }
 
@@ -394,6 +411,7 @@ public class ChartServiceImpl extends ServiceImpl<ChartMapper, ChartEntity> impl
 
             byte[] fileBytes = file.getBytes();
             // 1. 文件内容哈希
+            // todo 当文件过大，不应该仍然对所有文件内容哈希，而应该只对文件核心部分进行哈希，以减少计算量
             String fileFirst256Hex = sha256Hex(fileBytes);
 
             // 2. 构建有序参数Map，确保参数顺序不影响指纹结果

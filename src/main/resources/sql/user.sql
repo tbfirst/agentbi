@@ -14,17 +14,21 @@ CREATE TABLE IF NOT EXISTS `user` (
 -- 智能 bi 图表信息表
 create table if not exists chart
 (
-    id         bigint auto_increment comment 'id' primary key,
-    userId     bigint                             null comment '用户id',
-    name       varchar(128)                       null comment '图表名称',
-    goal       text                               null comment '分析目标',
-    chartData  text                               null comment '图表数据',
-    chartType  varchar(128)                       null comment '图表类型',
-    aiChart    text                               null comment 'ai 生成的图表数据',
-    aiResult   text                               null comment 'ai 生成的分析结论',
-    createTime datetime default CURRENT_TIMESTAMP not null comment '创建时间',
-    updateTime datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
-    isDelete   tinyint  default 0                 not null comment '是否删除'
+    id          bigint auto_increment comment 'id' primary key,
+    userId      bigint                             null comment '用户id',
+    fingerprint varchar(64)                        null comment '文件指纹(用于缓存命中判断)',
+    name        varchar(128)                       null comment '图表名称',
+    goal        text                               null comment '分析目标',
+    chartData   text                               null comment '图表数据',
+    chartType   varchar(128)                       null comment '图表类型',
+    aiChart     text                               null comment 'ai 生成的图表数据',
+    aiResult    text                               null comment 'ai 生成的分析结论',
+    createTime  datetime default CURRENT_TIMESTAMP not null comment '创建时间',
+    updateTime  datetime default CURRENT_TIMESTAMP not null on update CURRENT_TIMESTAMP comment '更新时间',
+    isDelete    tinyint  default 0                 not null comment '是否删除',
+    INDEX idx_fingerprint (fingerprint),
+    INDEX idx_user_id (userId),
+    INDEX idx_create_time (createTime)
 ) comment '智能 bi 图表信息表' collate = utf8mb4_unicode_ci;
 
 -- 文件解析任务表

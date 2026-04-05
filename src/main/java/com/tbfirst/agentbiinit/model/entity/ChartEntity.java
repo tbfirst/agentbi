@@ -26,6 +26,12 @@ public class ChartEntity {
      */
     private Long userId;
 
+    /**
+     * 文件指纹（用于缓存命中判断）
+     * 基于文件内容 + 分析参数生成的唯一标识
+     */
+    private String fingerprint;
+
      /**
      * 图表名称
      */

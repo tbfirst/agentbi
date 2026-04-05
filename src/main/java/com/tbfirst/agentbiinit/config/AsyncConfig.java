@@ -1,14 +1,11 @@
 package com.tbfirst.agentbiinit.config;
-import cn.hutool.core.thread.ThreadFactoryBuilder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 @EnableAsync    // ← 开启异步支持
 @Configuration
@@ -53,7 +50,7 @@ public class AsyncConfig {
     @Bean("fileParserExecutor")
     public ThreadPoolTaskExecutor fileParserExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        // 核心线程数（这里设置为2，根据实际情况调整）
+        // 核心线程数
         // 对于文件读写这类的IO密集型任务，核心线程数设置为两倍的CPU核心数+1
         executor.setCorePoolSize(16);
         // 最大线程数
